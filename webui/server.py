@@ -35,6 +35,10 @@ app = FastAPI(title="reg-factory WebUI")
 RUNS = {}
 _run_seq = [0]
 
+# 接码助手：内存记录当前租用的 sms-man 号  pkey -> {phone, rented_at, codes:[], service}
+SMS_RENTS = {}
+SMS_RENT_TTL = 1200  # 20 分钟租期(秒)
+
 
 # ============================================================ 配置/状态读取
 def _read_config_val(key, default=""):
@@ -253,6 +257,99 @@ def api_links():
     return {"links": getattr(schema, "EXTERNAL_LINKS", [])}
 
 
+@app.get("/api/embeds")
+def api_embeds():
+    return {"embeds": getattr(schema, "EMBED_PAGES", [])}
+
+
+# ============================================================ sms-man 接码助手
+def _gmail_service_default():
+    return _read_config_val("SMSMAN_APP_ID_GMAIL", "") or "google"
+
+
+@app.post("/api/sms/rent")
+async def api_sms_rent(request: Request):
+    try:
+        data = await request.json()
+    except Exception:
+        data = {}
+    service = (data or {}).get("service") or _gmail_service_default()
+    country = str((data or {}).get("country") or "0")
+    if not _read_config_val("SMSMAN_TOKEN", ""):
+        return {"ok": False, "msg": "未配置 SMSMAN_TOKEN，请到配置页填写"}
+    try:
+        from common import sms
+        res = await asyncio.to_thread(sms._smsman_get_phone, service, country, "", ())
+    except Exception as e:
+        return {"ok": False, "msg": f"租号异常: {str(e)[:120]}"}
+    if not res:
+        return {"ok": False, "msg": f"租号失败(服务 '{service}' 无货/余额不足/服务名错)。可在配置页测试 sms-man，或换服务名"}
+    phone, pkey = res
+    rented_at = time.time()
+    SMS_RENTS[pkey] = {"phone": phone, "rented_at": rented_at, "codes": [], "service": service}
+    return {"ok": True, "phone": phone, "pkey": pkey, "service": service, "ttl": SMS_RENT_TTL}
+
+
+@app.post("/api/sms/code")
+async def api_sms_code(request: Request):
+    data = await request.json()
+    pkey = (data or {}).get("pkey")
+    rec = SMS_RENTS.get(pkey)
+    if not rec:
+        return {"ok": False, "msg": "无此租号(可能已释放)"}
+    elapsed = time.time() - rec["rented_at"]
+    if elapsed > SMS_RENT_TTL:
+        return {"ok": False, "expired": True, "msg": "号码已超 20 分钟租期，请重新获取号码"}
+    try:
+        from common import sms
+        since = rec["codes"][-1] if rec["codes"] else None
+        # 留出余量不超过剩余租期
+        budget = int(min(90, max(15, SMS_RENT_TTL - elapsed)))
+        code = await asyncio.to_thread(sms.smsman_peek_code, pkey, budget, 5, False, since)
+    except Exception as e:
+        return {"ok": False, "msg": f"取码异常: {str(e)[:120]}"}
+    if not code:
+        return {"ok": False, "msg": "暂未收到新验证码(可稍后再点)", "codes": rec["codes"],
+                "elapsed": int(elapsed)}
+    if code not in rec["codes"]:
+        rec["codes"].append(code)
+    return {"ok": True, "code": code, "codes": rec["codes"], "elapsed": int(elapsed)}
+
+
+@app.post("/api/sms/release")
+async def api_sms_release(request: Request):
+    data = await request.json()
+    pkey = (data or {}).get("pkey")
+    if pkey in SMS_RENTS:
+        try:
+            from common import sms
+            await asyncio.to_thread(sms._smsman_release, pkey)
+        except Exception:
+            pass
+        SMS_RENTS.pop(pkey, None)
+    return {"ok": True}
+
+
+@app.get("/api/sms/rents")
+def api_sms_rents():
+    now = time.time()
+    out = []
+    for pkey, rec in list(SMS_RENTS.items()):
+        elapsed = now - rec["rented_at"]
+        if elapsed > SMS_RENT_TTL + 60:
+            SMS_RENTS.pop(pkey, None)  # 过期太久自动清理
+            continue
+        out.append({"pkey": pkey, "phone": rec["phone"], "service": rec.get("service"),
+                    "codes": rec["codes"], "elapsed": int(elapsed),
+                    "remain": max(0, int(SMS_RENT_TTL - elapsed))})
+    return {"rents": out, "ttl": SMS_RENT_TTL}
+
+
+@app.get("/", response_class=HTMLResponse)
+def index():
+    return open(os.path.join(WEBUI, "static", "index.html"), encoding="utf-8").read()
+
+
 @app.get("/api/status")
 def api_status():
     bb = _read_config_val("BITBROWSER_API", "http://127.0.0.1:54345")
@@ -419,11 +516,6 @@ async def api_stop(run_id: str):
         except Exception:
             pass
     return {"ok": True}
-
-
-@app.get("/", response_class=HTMLResponse)
-def index():
-    return open(os.path.join(WEBUI, "static", "index.html"), encoding="utf-8").read()
 
 
 app.mount("/static", StaticFiles(directory=os.path.join(WEBUI, "static")), name="static")

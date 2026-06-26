@@ -397,6 +397,45 @@ def _smsman_release(pkey):
         pass
 
 
+def smsman_peek_code(pkey, max_wait=90, interval=5, mark_used=False, since=None):
+    """手动多次接码用：轮询 get-sms 取一条码。**mark_used=False 时不 set-status**，
+    号在租期内保持活动，可再次调用拿下一条新码(Gmail 二次验证等)。
+    since: 只接受与该值不同的码(用于"再取一条新码"，跳过上次已拿到的)。
+    返回 code 或 None(超时/未到新码)。与自动接码 _smsman_get_code 的区别仅在不收口。"""
+    req_id = str(pkey).replace("smsman_", "")
+    start = time.time()
+    while time.time() - start < max_wait:
+        try:
+            r = requests.get(_smsman_url("get-sms"),
+                             params={"token": SMSMAN_TOKEN, "request_id": req_id}, timeout=30)
+            data = r.json()
+            if isinstance(data, dict) and data.get("sms_code"):
+                code = str(data["sms_code"])
+                m = re.search(r"\d{4,8}", code)
+                code = m.group(0) if m else code
+                # 若要求"新码"且与上次相同，继续等(同号下一条短信)
+                if since is not None and code == str(since):
+                    time.sleep(interval)
+                    continue
+                print(f"  [sms-man] peek code: {code}")
+                if mark_used:
+                    try:
+                        requests.get(_smsman_url("set-status"),
+                                     params={"token": SMSMAN_TOKEN, "request_id": req_id, "status": "used"}, timeout=10)
+                    except Exception:
+                        pass
+                return code
+            ec = (data or {}).get("error_code") if isinstance(data, dict) else None
+            # wait_sms = 还没到码；其它业务错误(如已过期/无此号)直接放弃
+            if ec and ec != "wait_sms":
+                print(f"  [sms-man] peek 终止: {ec}")
+                return None
+        except Exception:
+            pass
+        time.sleep(interval)
+    return None
+
+
 # ---------------- CLI 探测（查 OpenAI application_id / 国家 / 余额 / 价格）----------------
 def _cli(argv):
     if not SMSMAN_TOKEN:

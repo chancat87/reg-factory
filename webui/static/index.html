@@ -41,6 +41,31 @@
       </div>
     </section>
 
+    <!-- 内嵌功能页(Gmail 等 iframe + 接码助手) -->
+    <section id="view-embed" style="display:none">
+      <div class="embed-wrap">
+        <div class="embed-frame-box">
+          <div class="embed-bar">
+            <span id="embed-title"></span>
+            <a id="embed-open" href="#" target="_blank" rel="noopener" class="embed-open">↗ 新标签打开</a>
+          </div>
+          <iframe id="embed-frame" class="embed-frame" src="about:blank"></iframe>
+        </div>
+        <aside id="sms-helper" class="sms-helper" style="display:none">
+          <h3>📱 接码助手</h3>
+          <p class="hint">租一个手机号填进左侧 Gmail 表单，同号 20 分钟内可多次取验证码。</p>
+          <div class="sms-field">
+            <label>服务</label>
+            <input type="text" id="sms-service" placeholder="google">
+            <label>国家ID(可选)</label>
+            <input type="text" id="sms-country" placeholder="0=按价格自动">
+          </div>
+          <button id="btn-rent" class="btn-run">获取号码</button>
+          <div id="sms-rents"></div>
+        </aside>
+      </div>
+    </section>
+
     <!-- 配置视图 -->
     <section id="view-env" style="display:none">
       <div class="panel">

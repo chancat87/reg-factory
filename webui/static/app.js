@@ -1,8 +1,10 @@
 // reg-factory WebUI 前端逻辑（原生 JS，无构建）
 let SCRIPTS = [];
+let EMBEDS = [];
 let curRun = null;     // 当前运行 run_id
 let curSrc = null;     // 当前选中脚本
 let evtSrc = null;     // EventSource
+let smsTimer = null;   // 接码助手倒计时刷新
 
 const $ = (s, r=document) => r.querySelector(s);
 const $$ = (s, r=document) => [...r.querySelectorAll(s)];
@@ -23,6 +25,7 @@ setInterval(pollStatus, 5000);
 function showView(v){
   $('#view-run').style.display  = v==='run' ? 'flex' : 'none';
   $('#view-env').style.display  = v==='env' ? 'block' : 'none';
+  $('#view-embed').style.display = v==='embed' ? 'block' : 'none';
   $$('.navbtn').forEach(b=>b.classList.toggle('active', b.dataset.view===v));
   if(v==='env') loadEnv();
 }
@@ -35,6 +38,21 @@ async function loadScripts(){
   const cats = {};
   SCRIPTS.forEach(s => (cats[s.category]=cats[s.category]||[]).push(s));
   nav.innerHTML = '';
+
+  // 内嵌功能页(Gmail 等) —— 放最上面
+  try{
+    EMBEDS = (await (await fetch('/api/embeds')).json()).embeds || [];
+    if(EMBEDS.length){
+      const t=document.createElement('div'); t.className='cat-title'; t.textContent='功能'; nav.appendChild(t);
+      EMBEDS.forEach(e=>{
+        const b=document.createElement('button');
+        b.className='scriptbtn'; b.textContent='🌐 '+e.title; b.dataset.embed=e.id;
+        b.onclick=()=>openEmbed(e.id);
+        nav.appendChild(b);
+      });
+    }
+  }catch(err){}
+
   for(const cat of Object.keys(cats)){
     const t = document.createElement('div');
     t.className='cat-title'; t.textContent=cat; nav.appendChild(t);
@@ -210,6 +228,100 @@ $('#btn-save-env').onclick = async ()=>{
   msg.textContent = r.ok ? `✓ 已保存 ${r.saved} 项` : ('保存失败: '+(r.error||''));
   setTimeout(()=>msg.textContent='', 3000);
 };
+
+// ---------------------------------------------------------------- 内嵌页 + 接码助手
+function openEmbed(id){
+  const e = EMBEDS.find(x=>x.id===id);
+  if(!e) return;
+  showView('embed');
+  $$('.scriptbtn').forEach(b=>b.classList.toggle('active', b.dataset.embed===id));
+  $('#embed-title').textContent = e.title;
+  $('#embed-open').href = e.url;
+  $('#embed-frame').src = e.url;
+  const helper = $('#sms-helper');
+  if(e.sms_helper){
+    helper.style.display='block';
+    if(e.sms_service_default) $('#sms-service').placeholder = e.sms_service_default;
+    refreshRents();
+  }else{
+    helper.style.display='none';
+  }
+}
+
+async function copyText(txt, btn){
+  try{ await navigator.clipboard.writeText(txt); if(btn){const o=btn.textContent;btn.textContent='已复制';setTimeout(()=>btn.textContent=o,1200);} }
+  catch(e){ alert('复制失败,请手动选择: '+txt); }
+}
+
+function fmtRemain(sec){
+  sec=Math.max(0,sec); const m=Math.floor(sec/60), s=sec%60;
+  return `${m}:${String(s).padStart(2,'0')}`;
+}
+
+async function refreshRents(){
+  let data;
+  try{ data = await (await fetch('/api/sms/rents')).json(); }catch(e){ return; }
+  const wrap = $('#sms-rents'); wrap.innerHTML='';
+  (data.rents||[]).forEach(r=>{
+    const card = document.createElement('div'); card.className='rent-card';
+    const codesHtml = r.codes.length
+      ? r.codes.map(c=>`<span class="code-chip">${c}<button class="mini" data-copy="${c}">复制</button></span>`).join('')
+      : '<span class="dim">暂无验证码</span>';
+    card.innerHTML = `
+      <div class="rent-phone">
+        <b>+${r.phone}</b>
+        <button class="mini" data-copy="${r.phone}">复制号码</button>
+        <span class="remain" data-remain="${r.remain}">剩 ${fmtRemain(r.remain)}</span>
+      </div>
+      <div class="rent-actions">
+        <button class="btn-sm getcode" data-pkey="${r.pkey}">获取验证码</button>
+        <button class="btn-sm release" data-pkey="${r.pkey}">完成/释放</button>
+      </div>
+      <div class="codes">${codesHtml}</div>
+      <div class="sms-msg" data-msg="${r.pkey}"></div>`;
+    wrap.appendChild(card);
+  });
+  // 绑定
+  wrap.querySelectorAll('[data-copy]').forEach(b=> b.onclick=()=>copyText(b.dataset.copy,b));
+  wrap.querySelectorAll('.getcode').forEach(b=> b.onclick=()=>getCode(b.dataset.pkey,b));
+  wrap.querySelectorAll('.release').forEach(b=> b.onclick=()=>releaseNum(b.dataset.pkey));
+  // 倒计时滴答
+  if(smsTimer) clearInterval(smsTimer);
+  if((data.rents||[]).length){
+    smsTimer = setInterval(()=>{
+      $$('.remain').forEach(el=>{
+        let r=parseInt(el.dataset.remain,10)-1; el.dataset.remain=r;
+        el.textContent = r>0 ? '剩 '+fmtRemain(r) : '已过期';
+      });
+    },1000);
+  }
+}
+
+$('#btn-rent').onclick = async ()=>{
+  const btn=$('#btn-rent'); const o=btn.textContent; btn.disabled=true; btn.textContent='租号中…';
+  const body={ service: $('#sms-service').value.trim()||undefined, country: $('#sms-country').value.trim()||undefined };
+  try{
+    const r = await (await fetch('/api/sms/rent',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})).json();
+    if(!r.ok){ alert('获取号码失败: '+r.msg); }
+    await refreshRents();
+  }finally{ btn.disabled=false; btn.textContent=o; }
+};
+
+async function getCode(pkey, btn){
+  const o=btn.textContent; btn.disabled=true; btn.textContent='等待验证码…';
+  const msg = document.querySelector(`[data-msg="${pkey}"]`);
+  if(msg) msg.textContent='';
+  try{
+    const r = await (await fetch('/api/sms/code',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({pkey})})).json();
+    if(r.ok){ await refreshRents(); }
+    else if(msg){ msg.textContent = (r.expired?'⏰ ':'') + r.msg; }
+  }finally{ btn.disabled=false; btn.textContent=o; }
+}
+
+async function releaseNum(pkey){
+  await fetch('/api/sms/release',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({pkey})});
+  await refreshRents();
+}
 
 // ---------------------------------------------------------------- 启动
 loadScripts();
