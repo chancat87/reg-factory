@@ -672,7 +672,7 @@ def _env_truthy(name, default="0"):
 
 
 async def _maybe_confirm_before_register(page, tag, captcha_early_abort=False):
-    """Pause after the signup page opens so the operator can inspect it."""
+    """Auto-click a confirmation/consent gate shown before the signup form."""
     if captcha_early_abort or not _env_truthy("OUTLOOK_CONFIRM_BEFORE_REGISTER"):
         return
     try:
@@ -682,13 +682,35 @@ async def _maybe_confirm_before_register(page, tag, captcha_early_abort=False):
     print(f"  {tag} signup page opened: {page.url}")
     if title:
         print(f"  {tag} page title: {title[:100]}")
-    print("  请在浏览器中确认页面状态；确认无误后回到终端按 Enter 继续。输入 q 后回车可放弃本次。")
-    try:
-        ans = await asyncio.to_thread(input, "  continue? [Enter/q]: ")
-    except EOFError:
-        ans = ""
-    if ans.strip().lower() in {"q", "quit", "abort", "n", "no"}:
-        raise RuntimeError("operator aborted before registration")
+    selectors = [
+        'button:has-text("确认")', 'button:has-text("确定")',
+        'button:has-text("同意")', 'button:has-text("接受")',
+        'button:has-text("OK")', 'button:has-text("Ok")',
+        'button:has-text("Confirm")', 'button:has-text("Accept")',
+        'button:has-text("Agree")', 'button:has-text("Agree and continue")',
+        'button:has-text("同意して続行")', 'button:has-text("確認")',
+        'button:has-text("確定")',
+        'input[type="submit"][value*="确认"]', 'input[type="submit"][value*="确定"]',
+        'input[type="submit"][value*="同意"]', 'input[type="submit"][value*="接受"]',
+        'input[type="submit"][value*="OK"]', 'input[type="submit"][value*="Confirm"]',
+        'input[type="submit"][value*="Accept"]', 'input[type="submit"][value*="Agree"]',
+        'a:has-text("确认")', 'a:has-text("确定")', 'a:has-text("同意")',
+        'a:has-text("OK")', 'a:has-text("Confirm")', 'a:has-text("Accept")',
+    ]
+    for _ in range(3):
+        for sel in selectors:
+            try:
+                btn = page.locator(sel).first
+                if await btn.count() > 0 and await btn.is_visible(timeout=800):
+                    await btn.click(timeout=3000)
+                    print(f"  {tag} auto-confirm clicked: {sel}")
+                    await asyncio.sleep(2)
+                    return
+            except Exception:
+                pass
+        await asyncio.sleep(1)
+    print(f"  {tag} auto-confirm: no confirmation button found")
+    return
 
 
 async def register_outlook(page, context, idx=0, captcha_early_abort=False):
@@ -2081,7 +2103,7 @@ async def main():
     parser.add_argument("--no-verify", action="store_true",
                         help="Do not verify Outlook login before writing successful accounts")
     parser.add_argument("--confirm-before-register", action="store_true",
-                        help="Pause after the signup page opens; press Enter to start filling")
+                        help="Auto-click confirmation on the signup page before filling")
     args = parser.parse_args()
 
     global REGISTER_TIMEOUT, VERIFY_AFTER_REGISTER

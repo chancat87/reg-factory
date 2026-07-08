@@ -514,7 +514,7 @@ def main():
     ap.add_argument("--max-press", default="3",
                     help="OUTLOOK_REG_MAX_PRESS — captcha press-and-hold cap")
     ap.add_argument("--confirm-before-register", action="store_true",
-                    help="pause after the signup page opens; press Enter to start filling")
+                    help="auto-click confirmation on the signup page before filling")
     ap.add_argument("--timeout", type=int, default=180,
                     help="hard cap per attempt (seconds)")
     ap.add_argument("--sleep", type=int, default=5,

@@ -180,13 +180,13 @@ cp .env.example .env
 python run_full_flow.py                       # 注册 1 个 outlook 号后在 claude 上注册
 python run_full_flow.py --platforms claude chatgpt grok
 python run_full_flow.py --platforms chatgpt --import-c2a   # chatgpt 注册成功后即时导入 chatgpt2api
-python run_full_flow.py --platforms chatgpt --email-confirm-before-register  # Outlook 注册页人工确认后再填写
+python run_full_flow.py --platforms chatgpt --email-confirm-before-register  # Outlook 注册页自动点确认后再填写
 python run_full_flow.py --skip-email --email a@outlook.com --password xxx
 python run_full_flow.py --dry-run             # 只打印将执行的命令
 ```
 > 自动注入 `HTTP(S)_PROXY` 与 `CLASH_API/SECRET/GROUP` 给子进程。
 > `--import-c2a` 逐层透传到 `register_chatgpt.py`，只对 chatgpt 平台生效，需先配 `CHATGPT2API_URL/KEY`。
-> `--email-confirm-before-register` 会在 Outlook 注册页打开后暂停，终端按 Enter 才开始填写。
+> `--email-confirm-before-register` 会在 Outlook 注册页打开后自动点击确认/同意类按钮，再开始填写。
 
 ### 仅三平台注册（已有邮箱池 emails.txt）
 ```bash

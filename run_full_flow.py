@@ -232,7 +232,7 @@ def main():
     ap.add_argument("--email-total-timeout", type=int, default=1800, help="Stage A 总超时(s)")
     ap.add_argument("--max-press", default="3", help="人机验证按住次数上限")
     ap.add_argument("--email-confirm-before-register", action="store_true",
-                    help="邮箱注册页打开后暂停，确认页面后按 Enter 再开始填写")
+                    help="邮箱注册页打开后自动点确认，再开始填写")
     # 循环
     ap.add_argument("--rounds", type=int, default=1,
                     help="循环注册轮数；1=只跑一次(默认)，0=无限循环(Ctrl+C 停)")
