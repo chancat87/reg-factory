@@ -161,12 +161,12 @@ def create_browser_with_retry(bb, name, retries=3, **browser_options):
     return None
 
 
-async def open_and_connect(name, p=None):
+async def open_and_connect(name, p=None, browser_options=None):
     """创建并打开 BitBrowser 窗口，连接 Playwright 并注入 stealth。
     返回 (bb, profile_id, browser, context, page)。
     注意：调用方需自行管理 async_playwright 生命周期，或传入 p。"""
     bb = BitBrowser()
-    pid = create_browser_with_retry(bb, name)
+    pid = create_browser_with_retry(bb, name, **(browser_options or {}))
     if not pid:
         raise RuntimeError("create browser failed after retries")
     # open 也可能遇到 BitBrowser TLS 抖动，多重试几次（BitBrowser API 不稳）
